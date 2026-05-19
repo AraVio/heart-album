@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>纪念日心动相册</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    /* 【修复】去除泛白的渐变，改为纯黑深空背景 */
+    background: #000000;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    touch-action: none;
+  }
+  #canvas-container {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    z-index: 1;
+  }
+  .ui-layer {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 24px 20px 40px;
+  }
+  .title {
+    text-align: center;
+    color: rgba(255, 230, 230, 0.9);
+    font-size: 22px;
+    font-weight: 300;
+    letter-spacing: 6px;
+    text-shadow: 0 0 20px rgba(255, 150, 150, 0.4), 0 2px 4px rgba(0,0,0,0.5);
+    opacity: 0;
+    animation: fadeInDown 1.5s ease-out 1s forwards;
+  }
+  .subtitle {
+    text-align: center;
+    color: rgba(255, 200, 200, 0.6);
+    font-size: 13px;
+    margin-top: 8px;
+    letter-spacing: 2px;
+    opacity: 0;
+    animation: fadeInDown 1.5s ease-out 1.4s forwards;
+  }
+  .hint-bar {
+    text-align: center;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 12px;
+    letter-spacing: 1px;
+    line-height: 1.8;
+    opacity: 0;
+    animation: fadeInUp 1.5s ease-out 2s forwards;
+  }
+  .hint-bar span { display: inline-block; margin: 0 6px; }
+  @keyframes fadeInDown {
+    from { opacity: 0; transform: translateY(-20px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* 漂浮粉色爱心 */
+  .floating-heart {
+    position: fixed;
+    pointer-events: none;
+    z-index: 20;
+    font-size: 22px;
+    color: #ffb6c1;
+    text-shadow: 0 0 8px rgba(255, 182, 193, 0.8);
+    animation: heartFloat 1.8s ease-out forwards;
+  }
+  @keyframes heartFloat {
+    0%   { transform: translate(0, 0) scale(0.5) rotate(0deg); opacity: 0.9; }
+    30%  { transform: translate(var(--tx), -30px) scale(1.1) rotate(var(--r1)); opacity: 1; }
+    100% { transform: translate(var(--tx2), -140px) scale(0.2) rotate(var(--r2)); opacity: 0; }
+  }
+
+  /* 加载层 */
+  #loading {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: #000000;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.8s ease;
+  }
+  .loading-heart {
+    font-size: 48px;
+    color: #e8a0a0;
+    text-shadow: 0 0 30px rgba(232, 160, 160, 0.6);
+    animation: heartbeat 1s ease-in-out infinite;
+  }
+  @keyframes heartbeat {
+    0%, 100% { transform: scale(1); }
+    15% { transform: scale(1.25); }
+    30% { transform: scale(1); }
+    45% { transform: scale(1.15); }
+  }
+  .loading-text {
+    margin-top: 20px;
+    color: rgba(255, 220, 220, 0.7);
+    font-size: 15px;
+    letter-spacing: 4px;
+  }
+  .loading-progress {
+    margin-top: 12px;
+    width: 140px;
+    height: 2px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .loading-progress-bar {
+    width: 0%; height: 100%;
+    background: linear-gradient(90deg, #e8a0a0, #ffd700);
+    transition: width 0.3s ease;
+  }
+
+  /* 点击涟漪 */
+  .ripple {
+    position: fixed;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,182,193,0.4) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 15;
+    animation: rippleExpand 0.6s ease-out forwards;
+  }
+  @keyframes rippleExpand {
+    from { width: 0; height: 0; opacity: 0.8; }
+    to   { width: 120px; height: 120px; opacity: 0; margin-left: -60px; margin-top: -60px; }
+  }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+</head>
+<body>
+
+<div id="loading">
+  <div class="loading-heart">♥</div>
+  <div class="loading-text">正在加载心动时刻</div>
+  <div class="loading-progress"><div class="loading-progress-bar" id="progressBar"></div></div>
+</div>
+
+<div id="canvas-container"></div>
+
+<div class="ui-layer">
+  <div>
+    <div class="title">心动纪念册</div>
+    <div class="subtitle">EVERY MOMENT WITH YOU</div>
+  </div>
+  <div class="hint-bar">
+    <span>点击屏幕 · 触发心动</span>
+    <span>|</span>
+    <span>左滑右滑 · 旋转视角</span>
+  </div>
+</div>
+
+<script>
+const PHOTO_COUNT = 36;
+
+const IMAGE_URLS = [
+  "./images/09048828ad6bd883d21cb2d2f3dd0245.jpg", "./images/0ac469d58b86296831589e2d3ca55d69.jpg",
+  "./images/0f32c0dccb07438d7e6ff01a8d8b377c.jpg", "./images/177cd98007c1e5ace291ed28b51355fb.jpg",
+  "./images/24c70d427a6dfff9963b186fb22faed7.jpg", "./images/29a5845d262ea8697a7f873defcbfb54.jpg",
+  "./images/2f80294886a75339c551659591b3d0bc.jpg", "./images/341a73b0410b9a16d61de6fda3855e90.jpg",
+  "./images/47d464e0066a22c0cb4ccdc00cb709f4.jpg", "./images/5320e6a2a2a329c78b7b5fbf56247293.jpg",
+  "./images/56b051eb2f21d2914f49aeacfe1e8ce9.jpg", "./images/598aac231363d77e9e71469e7562e15a.jpg",
+  "./images/5b2bac24685ee3b53d12b414167109cc.jpg", "./images/61cf5033996b6c7985e1d0894b939b62.jpg",
+  "./images/65c9b9e59d6232a3bf832b1ba26be39f.jpg", "./images/719302ca48fa0bab3ba71fe87750e037.jpg",
+  "./images/75c86efb88a7c8e56de66845d87d0174.jpg", "./images/798b94a40d51467411731bf3451f200d.jpg",
+  "./images/8234d3d30abddd10bfc99dd1ee55dcb1.jpg", "./images/899fc380fff4556e07b7c1b8f3bed722.jpg",
+  "./images/8a66675241bbfd25df091f1c2745fd1d.jpg", "./images/8cc8de7d8663ba553cacb83c218ee5fd.jpg",
+  "./images/a109834542188fc5b93995ab265debc6.jpg", "./images/a27e10bc482e2cdff5fba6e8190a78d3.jpg",
+  "./images/a46852001d60dd2a07a55ba0b835fe76.jpg", "./images/b2198875ffb1007d8ad0e67624c2cc37.jpg",
+  "./images/badbe091d9dae0c80c036d9c8a8fef2b.jpg", "./images/bf520235340f470ccd7371f31208fdbf.jpg",
+  "./images/caa39d8a5d79bfc9605acac2966813b6.jpg", "./images/d1358e06cdd8a3eb80d82dec1689d8ff.jpg",
+  "./images/d789e81c5fb9f6759bc75aa05728af07.jpg", "./images/da2edb93047ecbd95601d5e85e6ab097.jpg",
+  "./images/e2d0a6a4bf339ea77a3afd21f40ba573.jpg", "./images/ea003970c5ff7d74b1ad978ef3d378e2.jpg",
+  "./images/ed7abc451e772cbf71295fa9096fd767.jpg", "./images/f9cc76d0b220a55a356e9525da08ada5.jpg"
+];
+
+// 【微调配置】：缩小了一点照片，拉开间距，更显轻盈
+const CONFIG = {
+  roseGold: 0xD4A5A5,      
+  roseGoldDark: 0xB76E79,  
+  bg: 0x000000, // 纯黑背景
+  photoW: 1.3,              
+  photoH: 1.6,
+  borderThickness: 0.06,
+  beatDuration: 0.9
+};
+
+// ================= Three.js 初始化 =================
+const container = document.getElementById('canvas-container');
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(CONFIG.bg, 0.015);
+
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 200);
+camera.position.set(0, 0, 38);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+container.appendChild(renderer.domElement);
+
+// ================= 灯光系统 =================
+scene.add(new THREE.AmbientLight(0xffeeff, 0.4));
+const dirLight = new THREE.DirectionalLight(0xfff0f5, 0.8);
+dirLight.position.set(4, 8, 6);
+scene.add(dirLight);
+
+const heartLight = new THREE.PointLight(0xff69b4, 1.5, 40, 1.5);
+heartLight.position.set(0, 0, 2);
+scene.add(heartLight);
+
+gsap.to(heartLight, {
+  intensity: 2.8, distance: 48, duration: 1.1, repeat: -1, yoyo: true, ease: "sine.inOut"
+});
+
+// ================= 星空粒子 =================
+function createStarfield(count, color, size, range) {
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const r = range * (0.3 + Math.random() * 0.7);
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    pos[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+    pos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+    pos[i * 3 + 2] = r * Math.cos(phi);
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const mat = new THREE.PointsMaterial({
+    color: color, size: size, transparent: true, opacity: 0.8,
+    blending: THREE.AdditiveBlending, depthWrite: false
+  });
+  return new THREE.Points(geo, mat);
+}
+
+// 剔除杂乱球体，保留纯粹星尘
+const stars = createStarfield(2000, 0xffffff, 0.15, 100);
+scene.add(stars);
+const distantStars = createStarfield(3000, 0xccddff, 0.08, 150);
+scene.add(distantStars);
+
+// ================= 【核心修复】爱心排版与伴生星尘 =================
+const heartGroup = new THREE.Group();
+heartGroup.rotation.x = 0.1;
+scene.add(heartGroup);
+
+const heartPositions = [];
+const HEART_SCALE = 0.52; // 调整整体跨度
+
+// 1. 照片位置预计算：延轮廓线分布
+for (let i = 0; i < PHOTO_COUNT; i++) {
+  // 按比例在圆周上取点
+  const t = (i / PHOTO_COUNT) * Math.PI * 2;
+  // 标准心形参数方程
+  const x = 16 * Math.pow(Math.sin(t), 3);
+  const y = 13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t);
+
+  // 添加小范围的随机错落感，避免变成死板的一条线
+  const noiseX = (Math.random() - 0.5) * 1.5;
+  const noiseY = (Math.random() - 0.5) * 1.5;
+  const noiseZ = (Math.random() - 0.5) * 5; // Z轴错落
+
+  heartPositions.push(new THREE.Vector3(
+    (x * HEART_SCALE) + noiseX,
+    (y * HEART_SCALE) + noiseY + 1.5, // 整体上抬居中
+    noiseZ
+  ));
+}
+
+// 2. 伴生爱心星云粒子：完美复刻参考图的边缘高光星尘
+const heartDustGeo = new THREE.BufferGeometry();
+const dustCount = 2500;
+const dustPos = new Float32Array(dustCount * 3);
+for (let i = 0; i < dustCount; i++) {
+    const t = Math.random() * Math.PI * 2;
+    const x = 16 * Math.pow(Math.sin(t), 3);
+    const y = 13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t);
+    
+    // 越靠近轮廓线越密集
+    const scatter = Math.random() > 0.4 ? (Math.random() - 0.5) * 2 : (Math.random() - 0.5) * 6;
+    const noiseZ = (Math.random() - 0.5) * 8;
+
+    dustPos[i * 3] = (x * HEART_SCALE) + scatter;
+    dustPos[i * 3 + 1] = (y * HEART_SCALE) + scatter + 1.5;
+    dustPos[i * 3 + 2] = noiseZ - 1.5; // 垫在照片背后
+}
+heartDustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+const heartDustMat = new THREE.PointsMaterial({
+    color: 0xffd1dc, size: 0.12, transparent: true, opacity: 0.6,
+    blending: THREE.AdditiveBlending, depthWrite: false
+});
+const heartDust = new THREE.Points(heartDustGeo, heartDustMat);
+heartGroup.add(heartDust); // 加入心跳组一起律动
+
+// ================= 加载照片 =================
+const photos = [];
+let loadedCount = 0;
+const progressBar = document.getElementById('progressBar');
+const textureLoader = new THREE.TextureLoader();
+
+function createPhoto(index, url) {
+  textureLoader.load(url, (texture) => {
+    texture.encoding = THREE.sRGBEncoding;
+    texture.minFilter = THREE.LinearFilter;
+
+    const { photoW: w, photoH: h, borderThickness: b } = CONFIG;
+
+    const photoGeo = new THREE.PlaneGeometry(w, h);
+    const photoMat = new THREE.MeshStandardMaterial({ map: texture, side: THREE.DoubleSide, roughness: 0.5 });
+    const photoMesh = new THREE.Mesh(photoGeo, photoMat);
+
+    const borderGeo = new THREE.PlaneGeometry(w + b * 2, h + b * 2);
+    const borderMat = new THREE.MeshStandardMaterial({
+      color: CONFIG.roseGold, metalness: 0.9, roughness: 0.2, side: THREE.DoubleSide
+    });
+    const borderMesh = new THREE.Mesh(borderGeo, borderMat);
+    borderMesh.position.z = -0.04;
+    photoMesh.add(borderMesh);
+
+    // 【修改点二】：去除了照片初始的随机偏转，确保完美面向镜头
+    const originPos = heartPositions[index];
+    photoMesh.position.copy(originPos);
+    photoMesh.lookAt(camera.position); 
+    
+    // (移除了原始代码里 rotation 加 Math.random() 的部分)
+
+    const originRot = photoMesh.rotation.clone();
+    heartGroup.add(photoMesh);
+
+    photos.push({
+      mesh: photoMesh, originPos: originPos, originRot: originRot,
+      floatPhase: Math.random() * Math.PI * 2, floatSpeed: 0.3 + Math.random() * 0.5,
+      rotSpeed: { x: (Math.random()-0.5)*0.015, y: (Math.random()-0.5)*0.015, z: (Math.random()-0.5)*0.01 }
+    });
+
+    loadedCount++;
+    progressBar.style.width = (loadedCount / PHOTO_COUNT * 100).toFixed(0) + '%';
+    if (loadedCount === PHOTO_COUNT) {
+      setTimeout(() => {
+        document.getElementById('loading').style.opacity = '0';
+        setTimeout(() => document.getElementById('loading').style.display = 'none', 800);
+      }, 400);
+    }
+  }, undefined, () => { loadedCount++; });
+}
+
+IMAGE_URLS.forEach((url, i) => createPhoto(i, url));
+
+// ================= 心跳与交互逻辑保留 =================
+const beatTl = gsap.timeline({ repeat: -1, yoyo: true });
+beatTl.to(heartGroup.scale, { x: 1.05, y: 1.05, z: 1.05, duration: 0.4, ease: "sine.out" })
+      .to(heartGroup.scale, { x: 1.02, y: 1.02, z: 1.02, duration: 0.6, ease: "sine.inOut" });
+
+// 【修改点二的配套标志位】：防止 LookAt 和动画收缩相互冲突
+let isExploded = false;
+let isContracting = false; 
+let isDragging = false, startX = 0, currentRotY = 0, targetRotY = 0;
+
+function explode() {
+  if (isExploded || photos.length < PHOTO_COUNT) return;
+  isExploded = true;
+  beatTl.pause();
+  gsap.to(heartGroup.scale, { x: 1, y: 1, z: 1, duration: 0.6 });
+
+  photos.forEach((p, i) => {
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    const radius = 16 + Math.random() * 18;
+    const tx = radius * Math.sin(phi) * Math.cos(theta);
+    const ty = radius * Math.sin(phi) * Math.sin(theta);
+    const tz = radius * Math.cos(phi) * 0.8 + (Math.random() - 0.5) * 16;
+
+    gsap.to(p.mesh.position, { x: tx, y: ty, z: tz, duration: 1.4 + Math.random() * 0.4, ease: "power3.out" });
+    gsap.to(p.mesh.rotation, { x: Math.random() * 6, y: Math.random() * 6, z: Math.random() * 6, duration: 1.6, ease: "power2.out" });
+  });
+}
+
+function contract() {
+  if (!isExploded) return;
+  isExploded = false;
+  isContracting = true; // 收缩期间暂停 LookAt 强制覆写
+  photos.forEach((p, i) => {
+    gsap.to(p.mesh.position, { x: p.originPos.x, y: p.originPos.y, z: p.originPos.z, duration: 1.2, ease: "power2.out" }); // 修正了可能的无效 ease 语法
+    gsap.to(p.mesh.rotation, { x: p.originRot.x, y: p.originRot.y, z: p.originRot.z, duration: 1.0, ease: "power2.out", onComplete: () => {
+        if (i === PHOTO_COUNT - 1) {
+            beatTl.resume();
+            isContracting = false; // 恢复 LookAt
+        }
+      }
+    });
+  });
+}
+
+function spawnFloatingHearts(clientX, clientY) {
+  const hearts = ['♥', '❤', '💗', '💖', '💕'];
+  const count = 3 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < count; i++) {
+    const el = document.createElement('div');
+    el.className = 'floating-heart';
+    el.textContent = hearts[Math.floor(Math.random() * hearts.length)];
+    const tx = (Math.random() - 0.5) * 80;
+    const tx2 = tx + (Math.random() - 0.5) * 40;
+    el.style.setProperty('--tx', tx + 'px'); el.style.setProperty('--tx2', tx2 + 'px');
+    el.style.setProperty('--r1', (Math.random() - 0.5) * 60 + 'deg'); el.style.setProperty('--r2', (Math.random() - 0.5) * 120 + 'deg');
+    el.style.left = (clientX + (Math.random() - 0.5) * 30) + 'px'; el.style.top = (clientY + (Math.random() - 0.5) * 30) + 'px';
+    el.style.fontSize = (18 + Math.random() * 16) + 'px';
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 2000);
+  }
+}
+
+function onPointerDown(e) { isDragging = true; startX = e.touches ? e.touches[0].clientX : e.clientX; }
+function onPointerMove(e) {
+  if (!isDragging) return;
+  const currentX = e.touches ? e.touches[0].clientX : e.clientX;
+  targetRotY += (currentX - startX) * 0.008;
+  
+  // 【修改点一】：锁定整体旋转角度，限定在正负 0.087 弧度（约5度）以内
+  targetRotY = Math.max(-0.087, Math.min(0.087, targetRotY)); 
+  
+  startX = currentX;
+  if (e.touches) e.preventDefault();
+}
+function onPointerUp() { isDragging = false; }
+function onTap(e) {
+  spawnFloatingHearts(e.touches ? e.touches[0].clientX : e.clientX, e.touches ? e.touches[0].clientY : e.clientY);
+  isExploded ? contract() : explode();
+}
+
+container.addEventListener('touchstart', onPointerDown, { passive: true });
+container.addEventListener('touchmove', onPointerMove, { passive: false });
+container.addEventListener('touchend', onPointerUp, { passive: true });
+container.addEventListener('touchstart', (e) => {
+  let moved = false; const onMove = () => { moved = true; };
+  window.addEventListener('touchmove', onMove, { passive: true, once: true });
+  setTimeout(() => { window.removeEventListener('touchmove', onMove); if (!moved) onTap(e); }, 180);
+}, { passive: true });
+container.addEventListener('mousedown', onPointerDown);
+window.addEventListener('mousemove', onPointerMove);
+window.addEventListener('mouseup', onPointerUp);
+container.addEventListener('click', onTap);
+
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const time = clock.getElapsedTime();
+
+  stars.rotation.y += 0.00015;
+  distantStars.rotation.y += 0.00008;
+  heartGroup.rotation.y += (targetRotY - heartGroup.rotation.y) * 0.06;
+
+  if (!isExploded) {
+    heartGroup.rotation.y += Math.sin(time * 0.4) * 0.0003;
+    
+    // 【修改点二】：只要在原始聚合状态下，永远直视镜头
+    if (!isContracting) {
+        photos.forEach(p => p.mesh.lookAt(camera.position));
+    }
+  } else {
+    for (let i = 0; i < photos.length; i++) {
+      const p = photos[i];
+      p.mesh.rotation.x += p.rotSpeed.x; p.mesh.rotation.y += p.rotSpeed.y; p.mesh.rotation.z += p.rotSpeed.z;
+      p.mesh.position.y += Math.sin(time * p.floatSpeed + p.floatPhase) * 0.003;
+      p.mesh.position.x += Math.cos(time * p.floatSpeed * 0.7 + p.floatPhase) * 0.002;
+    }
+  }
+
+  heartDust.material.opacity = 0.5 + Math.sin(time * 2) * 0.2; // 星尘呼吸闪烁
+  
+  renderer.render(scene, camera);
+}
+animate();
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+document.addEventListener('touchmove', (e) => { if (e.target === document.body || e.target === container) e.preventDefault(); }, { passive: false });
+</script>
+</body>
+</html>
