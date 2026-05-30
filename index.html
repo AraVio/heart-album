@@ -236,6 +236,28 @@ gsap.to(heartLight, {
 });
 
 // ================= 星空粒子 =================
+// 五角星纹理：用 Canvas 画一颗小五角星，替代默认方块
+function makeStarTexture() {
+  const c = document.createElement('canvas');
+  c.width = 32; c.height = 32;
+  const ctx = c.getContext('2d');
+  const cx = 16, cy = 16, R = 14, r = 5.5;
+  ctx.beginPath();
+  for (let i = 0; i < 5; i++) {
+    const aOuter = (i * 72 - 90) * Math.PI / 180;
+    const aInner = ((i * 72 + 36) - 90) * Math.PI / 180;
+    ctx.lineTo(cx + R * Math.cos(aOuter), cy + R * Math.sin(aOuter));
+    ctx.lineTo(cx + r * Math.cos(aInner), cy + r * Math.sin(aInner));
+  }
+  ctx.closePath();
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+  const tex = new THREE.CanvasTexture(c);
+  tex.needsUpdate = true;
+  return tex;
+}
+const starTex = makeStarTexture();
+
 function createStarfield(count, color, size, range) {
   const geo = new THREE.BufferGeometry();
   const pos = new Float32Array(count * 3);
@@ -249,7 +271,7 @@ function createStarfield(count, color, size, range) {
   }
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   const mat = new THREE.PointsMaterial({
-    color: color, size: size, transparent: true, opacity: 0.8,
+    color: color, size: size, map: starTex, transparent: true, opacity: 0.8,
     blending: THREE.AdditiveBlending, depthWrite: false
   });
   return new THREE.Points(geo, mat);
@@ -269,42 +291,71 @@ scene.add(heartGroup);
 const heartPositions = [];
 const HEART_SCALE = 0.52; // 调整整体跨度
 
-// 1. 照片位置预计算：延轮廓线分布
+// 预计算弧长累积表（照片和星尘共用）
+const ARC_N = 1000;
+const arcCumLen = [0];
+let totalArc = 0;
+for (let k = 1; k <= ARC_N; k++) {
+  const t0 = ((k-1) / ARC_N) * Math.PI * 2;
+  const t1 = (k / ARC_N) * Math.PI * 2;
+  const x0 = 16*Math.pow(Math.sin(t0),3), y0 = 13*Math.cos(t0)-5*Math.cos(2*t0)-2*Math.cos(3*t0)-Math.cos(4*t0);
+  const x1 = 16*Math.pow(Math.sin(t1),3), y1 = 13*Math.cos(t1)-5*Math.cos(2*t1)-2*Math.cos(3*t1)-Math.cos(4*t1);
+  totalArc += Math.sqrt((x1-x0)*(x1-x0) + (y1-y0)*(y1-y0));
+  arcCumLen.push(totalArc);
+}
+function arcLenToT(arcTarget) {
+  let lo = 0, hi = ARC_N;
+  while (lo < hi - 1) { const m = (lo+hi)>>1; if (arcCumLen[m] < arcTarget) lo = m; else hi = m; }
+  const frac = (arcTarget - arcCumLen[lo]) / (arcCumLen[lo+1] - arcCumLen[lo] || 1);
+  return ((lo + frac) / ARC_N) * Math.PI * 2;
+}
+
+// 1. 照片位置：弧长均匀采样，向内收紧至星云约一半处
+const PHOTO_SHRINK = 0.92; // 照片爱心在星云约60%处（比0.87略往外扩）
 for (let i = 0; i < PHOTO_COUNT; i++) {
-  // 按比例在圆周上取点
-  const t = (i / PHOTO_COUNT) * Math.PI * 2;
-  // 标准心形参数方程
+  const t = arcLenToT((i / PHOTO_COUNT) * totalArc);
   const x = 16 * Math.pow(Math.sin(t), 3);
   const y = 13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t);
 
-  // 添加小范围的随机错落感，避免变成死板的一条线
-  const noiseX = (Math.random() - 0.5) * 1.5;
-  const noiseY = (Math.random() - 0.5) * 1.5;
-  const noiseZ = (Math.random() - 0.5) * 5; // Z轴错落
+  const sx = x * PHOTO_SHRINK;
+  const sy = (y - 1) * PHOTO_SHRINK + 1;
+
+  const noiseX = (Math.random() - 0.5) * 1.2;
+  const noiseY = (Math.random() - 0.5) * 1.2;
+  const noiseZ = (Math.random() - 0.5) * 4;
 
   heartPositions.push(new THREE.Vector3(
-    (x * HEART_SCALE) + noiseX,
-    (y * HEART_SCALE) + noiseY + 1.5, // 整体上抬居中
+    (sx + noiseX) * HEART_SCALE,
+    (sy + noiseY) * HEART_SCALE + 1.5,
     noiseZ
   ));
 }
 
-// 2. 伴生爱心星云粒子：完美复刻参考图的边缘高光星尘
+// 2. 伴生爱心星云粒子：弧长均匀采样 + 粗弥散，星云感
 const heartDustGeo = new THREE.BufferGeometry();
 const dustCount = 2500;
 const dustPos = new Float32Array(dustCount * 3);
-for (let i = 0; i < dustCount; i++) {
-    const t = Math.random() * Math.PI * 2;
-    const x = 16 * Math.pow(Math.sin(t), 3);
-    const y = 13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t);
-    
-    // 越靠近轮廓线越密集
-    const scatter = Math.random() > 0.4 ? (Math.random() - 0.5) * 2 : (Math.random() - 0.5) * 6;
-    const noiseZ = (Math.random() - 0.5) * 8;
 
-    dustPos[i * 3] = (x * HEART_SCALE) + scatter;
-    dustPos[i * 3 + 1] = (y * HEART_SCALE) + scatter + 1.5;
-    dustPos[i * 3 + 2] = noiseZ - 1.5; // 垫在照片背后
+for (let i = 0; i < dustCount; i++) {
+  const t = arcLenToT(Math.random() * totalArc);
+
+  const hx = 16 * Math.pow(Math.sin(t), 3);
+  const hy = 13*Math.cos(t) - 5*Math.cos(2*t) - 2*Math.cos(3*t) - Math.cos(4*t);
+
+  // 弥散星云（再缩细12%）
+  // 50%近贴(±3.74)，30%中距(±7.48)，20%远飘(±11.97)
+  const r = Math.random();
+  const spread = r < 0.5 ? (Math.random()-0.5)*3.74 : r < 0.8 ? (Math.random()-0.5)*7.48 : (Math.random()-0.5)*11.97;
+  // 沿法线方向弥散
+  const nx = hx, ny = hy;
+  const nLen = Math.sqrt(nx*nx + ny*ny) || 1;
+  const offsetX = (Math.random()-0.5)*1.35 + (nx/nLen) * spread * 0.30;
+  const offsetY = (Math.random()-0.5)*1.35 + (ny/nLen) * spread * 0.30;
+  const noiseZ = (Math.random()-0.5) * 7.5;
+
+  dustPos[i * 3]     = (hx + offsetX) * HEART_SCALE;
+  dustPos[i * 3 + 1] = (hy + offsetY) * HEART_SCALE + 1.5;
+  dustPos[i * 3 + 2] = noiseZ - 1.5;
 }
 heartDustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
 const heartDustMat = new THREE.PointsMaterial({
